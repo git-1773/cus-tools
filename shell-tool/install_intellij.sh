@@ -6,6 +6,7 @@
 # ✅ 重新签名 / 清理 xattr / 刷新 LaunchServices
 # ✅ 修复 zsh 挂载点丢失问题
 # ✅ 输出优化，终端更清晰
+# ✅ 临时文件在安装完成或异常退出后自动清理
 
 export LANG=zh_CN.UTF-8
 export LC_ALL=zh_CN.UTF-8
@@ -37,15 +38,27 @@ warn()   { log "⚠️  $*"; }
 err()    { log "❌ $*"; }
 
 # -------------------------------
-# 保证退出时尝试卸载我们挂载的临时卷
+# 保证退出时尝试卸载挂载卷 & 清理临时文件
 # -------------------------------
 TEMP_MOUNTS=()
+TEMP_FILES=()
 cleanup() {
+  # 卸载挂载卷
   if [[ ${#TEMP_MOUNTS[@]} -gt 0 ]]; then
     for m in "${TEMP_MOUNTS[@]}"; do
       if [[ -d "$m" ]]; then
         warn "退出时尝试卸载临时挂载：$m"
         sudo hdiutil detach "$m" -force >/dev/null 2>&1 || warn "卸载 $m 失败"
+      fi
+    done
+  fi
+
+  # 删除临时文件
+  if [[ ${#TEMP_FILES[@]} -gt 0 ]]; then
+    for f in "${TEMP_FILES[@]}"; do
+      if [[ -f "$f" ]]; then
+        warn "退出时删除临时文件：$f"
+        rm -f "$f" || warn "删除 $f 失败"
       fi
     done
   fi
@@ -71,48 +84,27 @@ unmount_old_intellij_volumes() {
 mount_dmg() {
   local dmg_path="$1"
   info "📀 尝试挂载 DMG：$dmg_path"
-  local out mp
 
-  # 挂载 DMG 并获取 plist 输出
-  out=$(hdiutil attach -nobrowse -readonly -plist "$dmg_path" 2>/dev/null)
+  # 创建临时文件保存 plist 输出
+  local tmpfile=$(mktemp)
+  TEMP_FILES+=("$tmpfile")
 
-  # 遍历 system-entities 查找第一个有效 mount-point
-  local count
-  count=$(/usr/libexec/PlistBuddy -c "Print :system-entities" /dev/stdin <<< "$out" 2>/dev/null | grep -c 'Dict {')
-  for i in $(seq 0 $((count-1))); do
-    mp=$(/usr/libexec/PlistBuddy -c "Print :system-entities:$i:mount-point" /dev/stdin <<< "$out" 2>/dev/null)
-    if [[ -n "$mp" && -d "$mp" ]]; then
-      ok "挂载成功：$mp"
-      TEMP_MOUNTS+=("$mp")
-      echo "$mp"
-      return 0
-    fi
-  done
+  hdiutil attach -nobrowse -readonly -plist "$dmg_path" > "$tmpfile" 2>/dev/null
 
-  # fallback 到 awk 方法
-  if [[ -z "$mp" ]]; then
-    mp=$(echo "$out" | awk '
-      /<key>mount-point<\/key>/ {
-        getline
-        if($0 ~ /<string>/) {
-          gsub(/.*<string>/,"")
-          gsub(/<\/string>.*/,"")
-          print
-          exit
-        }
-      }
-    ')
-    mp=$(echo "$mp" | sed 's/^ *//;s/ *$//')
-    if [[ -n "$mp" && -d "$mp" ]]; then
-      ok "挂载成功（fallback）：$mp"
-      TEMP_MOUNTS+=("$mp")
-      echo "$mp"
-      return 0
-    fi
+  # 使用 /usr/libexec/PlistBuddy 解析 mount-point
+  local mp
+  mp=$(/usr/libexec/PlistBuddy -c "Print :system-entities:0:mount-point" "$tmpfile" 2>/dev/null)
+  mp=$(echo "$mp" | sed 's/^ *//;s/ *$//')
+
+  if [[ -n "$mp" && -d "$mp" ]]; then
+    ok "挂载成功：$mp"
+    TEMP_MOUNTS+=("$mp")
+    echo "$mp"
+    return 0
+  else
+    err "DMG 挂载失败或未找到卷：$dmg_path"
+    return 1
   fi
-
-  err "DMG 挂载失败或未找到卷：$dmg_path"
-  return 1
 }
 
 # -------------------------------
