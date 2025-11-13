@@ -66,14 +66,14 @@ unmount_old_intellij_volumes() {
 }
 
 # -------------------------------
-# ✅ 支持中文/空格路径的安全挂载 DMG
+# ✅ 支持中文/空格路径的安全挂载 DMG（修复挂载点丢失问题）
 # -------------------------------
 mount_dmg() {
   local dmg_path="$1"
   info "📀 尝试挂载 DMG：$dmg_path"
-  local mp
-  mp=$(hdiutil attach -nobrowse -readonly -plist "$dmg_path" 2>/dev/null | \
-       awk '/<key>mount-point<\/key>/ {f=1; next} f && /<string>/ {gsub(/.*<string>/,""); gsub(/<\/string>.*/,""); print; exit}')
+  local out mp
+  out=$(hdiutil attach -nobrowse -readonly -plist "$dmg_path" 2>/dev/null)
+  mp=$(echo "$out" | awk '/<key>mount-point<\/key>/ {getline; if($0 ~ /<string>/){gsub(/.*<string>/,""); gsub(/<\/string>.*/,""); print; exit}}')
   if [[ -n "$mp" && -d "$mp" ]]; then
     ok "挂载成功：$mp"
     TEMP_MOUNTS+=("$mp")
