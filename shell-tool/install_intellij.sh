@@ -76,10 +76,20 @@ mount_dmg() {
   # 挂载 DMG 并获取 plist 输出
   out=$(hdiutil attach -nobrowse -readonly -plist "$dmg_path" 2>/dev/null)
 
-  # 使用 /usr/libexec/PlistBuddy 解析 mount-point，严格保留空格和中文
-  mp=$(/usr/libexec/PlistBuddy -c "Print :system-entities:0:mount-point" /dev/stdin <<< "$out" 2>/dev/null)
+  # 遍历 system-entities 查找第一个有效 mount-point
+  local count
+  count=$(/usr/libexec/PlistBuddy -c "Print :system-entities" /dev/stdin <<< "$out" 2>/dev/null | grep -c 'Dict {')
+  for i in $(seq 0 $((count-1))); do
+    mp=$(/usr/libexec/PlistBuddy -c "Print :system-entities:$i:mount-point" /dev/stdin <<< "$out" 2>/dev/null)
+    if [[ -n "$mp" && -d "$mp" ]]; then
+      ok "挂载成功：$mp"
+      TEMP_MOUNTS+=("$mp")
+      echo "$mp"
+      return 0
+    fi
+  done
 
-  # 如果上述解析失败，则 fallback 到原来的 awk 方法
+  # fallback 到 awk 方法
   if [[ -z "$mp" ]]; then
     mp=$(echo "$out" | awk '
       /<key>mount-point<\/key>/ {
@@ -92,21 +102,17 @@ mount_dmg() {
         }
       }
     ')
+    mp=$(echo "$mp" | sed 's/^ *//;s/ *$//')
+    if [[ -n "$mp" && -d "$mp" ]]; then
+      ok "挂载成功（fallback）：$mp"
+      TEMP_MOUNTS+=("$mp")
+      echo "$mp"
+      return 0
+    fi
   fi
 
-  # 去掉开头结尾空格
-  mp=$(echo "$mp" | sed 's/^ *//;s/ *$//')
-
-  # 检查挂载点是否有效
-  if [[ -n "$mp" && -d "$mp" ]]; then
-    ok "挂载成功：$mp"
-    TEMP_MOUNTS+=("$mp")
-    echo "$mp"
-    return 0
-  else
-    err "DMG 挂载失败或未找到卷：$dmg_path"
-    return 1
-  fi
+  err "DMG 挂载失败或未找到卷：$dmg_path"
+  return 1
 }
 
 # -------------------------------
