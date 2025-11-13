@@ -31,13 +31,26 @@ function unmount_old_volumes() {
 
 function mount_dmg() {
   local dmg_path="$1"
-  echo "📀 挂载 $dmg_path ..."
-  local mp=$(hdiutil attach -nobrowse -readonly "$dmg_path" | grep "/Volumes/" | tail -1 | awk '{$1=$2=""; print $0}' | sed 's/^ *//')
-  if [[ -z "$mp" ]]; then
-    echo ""
-  else
-    echo "$mp"
+  echo "👉 尝试挂载 DMG: $dmg_path"
+  # 使用统一输出格式，避免语言干扰
+  local output
+  output=$(hdiutil attach -nobrowse -readonly -plist "$dmg_path" 2>/dev/null)
+  if [[ $? -ne 0 ]]; then
+    echo "❌ DMG 挂载失败"
+    return 1
   fi
+
+  # 从 plist 格式输出中解析出挂载点
+  local mount_point
+  mount_point=$(echo "$output" | grep -A1 "<key>mount-point</key>" | tail -1 | sed 's/.*<string>\(.*\)<\/string>.*/\1/')
+  
+  if [[ -z "$mount_point" ]]; then
+    echo "❌ 未找到挂载点"
+    return 1
+  fi
+  
+  echo "✅ 挂载成功：$mount_point"
+  echo "$mount_point"
 }
 
 # -------------------------------
