@@ -76,19 +76,23 @@ mount_dmg() {
   # 挂载 DMG 并获取 plist 输出
   out=$(hdiutil attach -nobrowse -readonly -plist "$dmg_path" 2>/dev/null)
 
-  # 使用 awk 提取 mount-point，同时保留空格
-  mp=$(echo "$out" | awk '
-    /<key>mount-point<\/key>/ {
-      getline
-      if($0 ~ /<string>/) {
-        # 去掉 <string> 和 </string> 标签
-        gsub(/.*<string>/,"")
-        gsub(/<\/string>.*/,"")
-        print
-        exit
+  # 使用 /usr/libexec/PlistBuddy 解析 mount-point，严格保留空格和中文
+  mp=$(/usr/libexec/PlistBuddy -c "Print :system-entities:0:mount-point" /dev/stdin <<< "$out" 2>/dev/null)
+
+  # 如果上述解析失败，则 fallback 到原来的 awk 方法
+  if [[ -z "$mp" ]]; then
+    mp=$(echo "$out" | awk '
+      /<key>mount-point<\/key>/ {
+        getline
+        if($0 ~ /<string>/) {
+          gsub(/.*<string>/,"")
+          gsub(/<\/string>.*/,"")
+          print
+          exit
+        }
       }
-    }
-  ')
+    ')
+  fi
 
   # 去掉开头结尾空格
   mp=$(echo "$mp" | sed 's/^ *//;s/ *$//')
