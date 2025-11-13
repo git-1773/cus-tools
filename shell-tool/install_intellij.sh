@@ -18,6 +18,14 @@ INFO_2023_VALUES=("com.jetbrains.intellij.2023.2" "IntelliJ IDEA 2023.2" "Intell
 INFO_2025_KEYS=("CFBundleIdentifier" "CFBundleName" "CFBundleDisplayName" "LSMinimumSystemVersion")
 INFO_2025_VALUES=("com.jetbrains.intellij.2025.2" "IntelliJ IDEA 2025.2" "IntelliJ IDEA 2025.2" "10.13")
 
+echo "🔍 检查并清理残留挂载卷..."
+for vol in /Volumes/IntelliJ*; do
+  if [[ -d "$vol" ]]; then
+    echo "  ➜ 卸载残留卷: $vol"
+    sudo hdiutil detach "$vol" -force >/dev/null 2>&1
+  fi
+done
+
 # -------------------------------
 # 工具函数
 # -------------------------------
@@ -32,7 +40,8 @@ function unmount_old_volumes() {
 function mount_dmg() {
   local dmg_path="$1"
   echo "👉 尝试挂载 DMG: $dmg_path"
-  # 使用统一输出格式，避免语言干扰
+
+  # 使用 -plist 输出标准 XML 结构
   local output
   output=$(hdiutil attach -nobrowse -readonly -plist "$dmg_path" 2>/dev/null)
   if [[ $? -ne 0 ]]; then
@@ -40,15 +49,15 @@ function mount_dmg() {
     return 1
   fi
 
-  # 从 plist 格式输出中解析出挂载点
+  # 用 awk 和 grep 提取 XML 中的挂载点（更兼容 zsh）
   local mount_point
-  mount_point=$(echo "$output" | grep -A1 "<key>mount-point</key>" | tail -1 | sed 's/.*<string>\(.*\)<\/string>.*/\1/')
-  
-  if [[ -z "$mount_point" ]]; then
+  mount_point=$(echo "$output" | awk '/<key>mount-point<\/key>/{getline; if($0 ~ /<string>/){match($0, /<string>([^<]+)<\/string>/, a); print a[1]; exit}}')
+
+  if [[ -z "$mount_point" || ! -d "$mount_point" ]]; then
     echo "❌ 未找到挂载点"
     return 1
   fi
-  
+
   echo "✅ 挂载成功：$mount_point"
   echo "$mount_point"
 }
