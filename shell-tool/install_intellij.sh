@@ -41,7 +41,7 @@ function mount_dmg() {
   local dmg_path="$1"
   echo "👉 尝试挂载 DMG: $dmg_path"
 
-  # 使用 -plist 输出标准 XML 结构
+  # 1️⃣ 使用 -plist 输出 XML
   local output
   output=$(hdiutil attach -nobrowse -readonly -plist "$dmg_path" 2>/dev/null)
   if [[ $? -ne 0 ]]; then
@@ -49,10 +49,18 @@ function mount_dmg() {
     return 1
   fi
 
-  # 用 awk 和 grep 提取 XML 中的挂载点（更兼容 zsh）
+  # 2️⃣ 提取 <key>mount-point</key> 后紧随的 <string> 值（兼容 BSD awk）
   local mount_point
-  mount_point=$(echo "$output" | awk '/<key>mount-point<\/key>/{getline; if($0 ~ /<string>/){match($0, /<string>([^<]+)<\/string>/, a); print a[1]; exit}}')
+  mount_point=$(echo "$output" | awk '
+    /<key>mount-point<\/key>/ {found=1; next}
+    found && /<string>/ {
+      sub(/.*<string>/, "", $0)
+      sub(/<\/string>.*/, "", $0)
+      print $0
+      exit
+    }')
 
+  # 3️⃣ 检查结果
   if [[ -z "$mount_point" || ! -d "$mount_point" ]]; then
     echo "❌ 未找到挂载点"
     return 1
