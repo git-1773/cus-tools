@@ -1,6 +1,9 @@
 #!/bin/zsh
 # install_intellij.sh
-# zsh: 为多版本 IntelliJ 安装做全面处理（支持中文/空格路径、卸载残留挂载、签名、清除 quarantine、刷新 LaunchServices）
+# 终极版：支持多版本 IntelliJ IDEA 安装，自动卸载旧卷、处理 Info.plist、签名修复与缓存刷新。
+# ✅ 兼容中文路径与空格路径
+# ✅ 修复 bad substitution 错误
+# ✅ 自动检测 DMG 是否存在并优雅报错
 
 export LANG=zh_CN.UTF-8
 export LC_ALL=zh_CN.UTF-8
@@ -8,7 +11,7 @@ set -e
 set -o pipefail
 
 # -------------------------------
-# 配置区（请按需修改路径）
+# 配置区（按需修改路径）
 # -------------------------------
 IDEA_2023_DMG="/Users/ypj/Desktop/移动硬盘/aldi待整理文件夹/待安装软件列表/ideaIU-2023.2.dmg"
 IDEA_2025_DMG="/Users/ypj/Downloads/download_googlechrome/ideaIU-2025.2.4-aarch64.dmg"
@@ -31,7 +34,9 @@ ok()     { log "✅ $*"; }
 warn()   { log "⚠️  $*"; }
 err()    { log "❌ $*"; }
 
-# 保证退出时尝试卸载我们挂载的临时卷
+# -------------------------------
+# 自动清理临时挂载
+# -------------------------------
 TEMP_MOUNTS=()
 cleanup() {
   if [[ ${#TEMP_MOUNTS[@]} -gt 0 ]]; then
@@ -45,12 +50,13 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# 卸载残留 IntelliJ 相关挂载（保守匹配 /Volumes/IntelliJ*）
+# -------------------------------
+# 卸载残留 IntelliJ 挂载卷
+# -------------------------------
 unmount_old_intellij_volumes() {
   info "🔍 检查并尝试卸载残留 IntelliJ 挂载卷..."
   for vol in /Volumes/IntelliJ*; do
     if [[ -d "$vol" ]]; then
-      # 仅卸载路径名以 IntelliJ 开头的卷，避免误操作其他卷
       base=$(basename "$vol")
       if [[ "$base" = IntelliJ* ]]; then
         info "  ➜ 卸载残留卷: $vol"
@@ -64,16 +70,22 @@ unmount_old_intellij_volumes() {
   done
 }
 
-# 将 DMG 挂载并返回挂载点（兼容 BSD awk、中文路径、-plist 输出）
-# 返回值：打印挂载点（stdout），失败返回非0
+# -------------------------------
+# 挂载 DMG 并返回挂载点
+# -------------------------------
 mount_dmg() {
   local dmg_path="$1"
   local max_retries=${2:-3}
+
+  if [[ ! -f "$dmg_path" ]]; then
+    err "DMG 文件不存在：$dmg_path"
+    return 1
+  fi
+
   info "📀 尝试挂载 DMG：$dmg_path"
 
   local attempt=1
   while (( attempt <= max_retries )); do
-    # 使用 plist 输出便于解析（在 zsh 上用 awk 提取 <string>)
     local out
     if ! out=$(hdiutil attach -nobrowse -readonly -plist "$dmg_path" 2>/dev/null); then
       warn "hdiutil attach 返回错误（第 ${attempt} 次）"
@@ -82,7 +94,6 @@ mount_dmg() {
       continue
     fi
 
-    # BSD awk 解析：找到 <key>mount-point</key> 后的 <string> 内容
     local mp
     mp=$(echo "$out" | awk '
       /<key>mount-point<\/key>/ {found=1; next}
@@ -95,7 +106,6 @@ mount_dmg() {
 
     if [[ -n "$mp" && -d "$mp" ]]; then
       ok "挂载成功：$mp"
-      # 记录到临时挂载列表，脚本退出时会尝试卸载
       TEMP_MOUNTS+=("$mp")
       echo "$mp"
       return 0
@@ -110,12 +120,13 @@ mount_dmg() {
   return 1
 }
 
-# 复制 .app 并修复签名、xattr、LaunchServices
+# -------------------------------
+# 从挂载卷复制 .app 到目标目录
+# -------------------------------
 install_from_mount() {
   local mount_point="$1"
   local dest_app="$2"
-  local -a keys=("${(@P)3}")   # placeholder - not used; we'll pass keys/values explicit
-  # 寻找 DMG 内的 .app（顶层）
+
   local src_app
   src_app=$(find "$mount_point" -maxdepth 1 -name "*.app" -print -quit || true)
   if [[ -z "$src_app" || ! -d "$src_app" ]]; then
@@ -124,7 +135,6 @@ install_from_mount() {
   fi
 
   info "📦 复制应用：$src_app -> $dest_app"
-  # 删除目标（保守操作，先备份可以改为移动到废纸篓）
   if [[ -d "$dest_app" ]]; then
     info "    删除已有目标：$dest_app"
     sudo rm -rf "$dest_app"
@@ -135,12 +145,12 @@ install_from_mount() {
     err "复制失败：$dest_app 未创建"
     return 1
   fi
-
-  # 修 Info.plist 的步骤由调用方传入键值对
   return 0
 }
 
-# 修改 Info.plist 的通用函数：传入 dest_app, keys_array_name, values_array_name
+# -------------------------------
+# 修改 Info.plist（键值数组）
+# -------------------------------
 modify_info_plist() {
   local dest_app="$1"; shift
   local keys_name="$1"; shift
@@ -152,9 +162,7 @@ modify_info_plist() {
     return 0
   fi
 
-  # 读取键值数组
-  local -a keys
-  local -a vals
+  local -a keys vals
   eval "keys=(\"\${${keys_name}[@]}\")"
   eval "vals=(\"\${${vals_name}[@]}\")"
 
@@ -162,28 +170,29 @@ modify_info_plist() {
   for ((i=0;i<n;i++)); do
     local k=${keys[i]}
     local v=${vals[i]}
-    # 用 PlistBuddy 设置或新增
     sudo /usr/libexec/PlistBuddy -c "Set :${k} ${v}" "$plist" 2>/dev/null || \
       sudo /usr/libexec/PlistBuddy -c "Add :${k} string ${v}" "$plist" 2>/dev/null || \
       warn "无法写 Info.plist 的 ${k}（继续）"
   done
 }
 
-# 清理安全属性、签名、刷新 LaunchServices
+# -------------------------------
+# 后处理：xattr、签名、注册
+# -------------------------------
 post_install_fixup() {
   local dest_app="$1"
-  info "🧹 清除扩展属性（xattr）与修正权限：$dest_app"
-  sudo xattr -cr "$dest_app" >/dev/null 2>&1 || warn "xattr 清理失败（可忽略）"
-  sudo chmod -R 755 "$dest_app" >/dev/null 2>&1 || warn "chmod 失败（可忽略）"
+  info "🧹 清除扩展属性与修正权限：$dest_app"
+  sudo xattr -cr "$dest_app" >/dev/null 2>&1 || warn "xattr 清理失败"
+  sudo chmod -R 755 "$dest_app" >/dev/null 2>&1 || warn "chmod 失败"
 
-  info "🔏 重新签名（占位签名）并刷新 LaunchServices：$dest_app"
-  sudo codesign --force --deep --sign - "$dest_app" >/dev/null 2>&1 || warn "codesign 失败（可忽略）"
-
-  # 强制注册到 LaunchServices，确保 Launchpad / Spotlight 能看到新版路径
-  /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$dest_app" >/dev/null 2>&1 || warn "lsregister 刷新失败（可忽略）"
+  info "🔏 重新签名并刷新 LaunchServices：$dest_app"
+  sudo codesign --force --deep --sign - "$dest_app" >/dev/null 2>&1 || warn "codesign 失败"
+  /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$dest_app" >/dev/null 2>&1 || warn "lsregister 刷新失败"
 }
 
-# 主安装流程：给出 dmg_path, dest_app, keys_array_name, values_array_name
+# -------------------------------
+# 主流程：安装单个版本
+# -------------------------------
 deploy_from_dmg() {
   local dmg_path="$1"
   local dest_app="$2"
@@ -194,43 +203,21 @@ deploy_from_dmg() {
   info "开始安装：$dest_app"
   info "DMG 路径：$dmg_path"
 
-  # 尝试挂载
   local mp
   if ! mp=$(mount_dmg "$dmg_path"); then
     err "挂载失败，跳过安装：$dmg_path"
     return 1
   fi
 
-  # 复制 .app
   if ! install_from_mount "$mp" "$dest_app"; then
     err "复制失败，尝试卸载挂载并返回"
     sudo hdiutil detach "$mp" -force >/dev/null 2>&1 || true
     return 1
   fi
 
-  # 卸载挂载点（我们已复制出 app）
-  if sudo hdiutil detach "$mp" -force >/dev/null 2>&1; then
-    ok "已卸载挂载点：$mp"
-    # 从临时列表移除（避免 cleanup 再次尝试）
-    for i in "${(@)TEMP_MOUNTS}"; do
-      if [[ "$i" == "$mp" ]]; then
-        # 删除匹配项
-        local newarr=()
-        for j in "${TEMP_MOUNTS[@]}"; do
-          [[ "$j" == "$mp" ]] || newarr+=("$j")
-        done
-        TEMP_MOUNTS=("${newarr[@]}")
-        break
-      fi
-    done
-  else
-    warn "卸载 $mp 失败（但是继续）"
-  fi
+  sudo hdiutil detach "$mp" -force >/dev/null 2>&1 || warn "卸载 $mp 失败（继续）"
 
-  # 修改 Info.plist
   modify_info_plist "$dest_app" "$keys_array_name" "$vals_array_name"
-
-  # 修复签名/权限/缓存
   post_install_fixup "$dest_app"
 
   ok "$dest_app 安装完成"
@@ -238,24 +225,20 @@ deploy_from_dmg() {
 }
 
 # -------------------------------
-# 主流程
+# 主入口
 # -------------------------------
 info "🧹 清理旧版本（仅 /Applications 指定目标）..."
 sudo rm -rf "$IDEA_2023_APP" "$IDEA_2025_APP" >/dev/null 2>&1 || true
-
 unmount_old_intellij_volumes
 
-# 依次安装两个版本（可按需改顺序）
-deploy_from_dmg "$IDEA_2023_DMG" "$IDEA_2023_APP" "INFO_2023_KEYS" "INFO_2023_VALUES" || warn "2023.2 安装过程返回非0"
-deploy_from_dmg "$IDEA_2025_DMG" "$IDEA_2025_APP" "INFO_2025_KEYS" "INFO_2025_VALUES" || warn "2025.2 安装过程返回非0"
+deploy_from_dmg "$IDEA_2023_DMG" "$IDEA_2023_APP" "INFO_2023_KEYS" "INFO_2023_VALUES" || warn "2023.2 安装返回非0"
+deploy_from_dmg "$IDEA_2025_DMG" "$IDEA_2025_APP" "INFO_2025_KEYS" "INFO_2025_VALUES" || warn "2025.2 安装返回非0"
 
-# 最终提示启动指令（使用 -n 保证新实例）
 log ""
-ok "安装脚本执行完毕。请分别用下列命令启动并验证："
+ok "安装脚本执行完毕。请使用以下命令启动验证："
 log "启动 2023.2:"
 log "  open -n \"$IDEA_2023_APP\" --args -Didea.paths.selector=IntelliJIdea2023.2"
 log "启动 2025.2:"
 log "  open -n \"$IDEA_2025_APP\" --args -Didea.paths.selector=IntelliJIdea2025.2"
 
-# 结束（trap 会处理未卸载的临时挂载）
 exit 0
