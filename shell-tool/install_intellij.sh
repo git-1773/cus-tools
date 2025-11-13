@@ -73,17 +73,27 @@ mount_dmg() {
   info "📀 尝试挂载 DMG：$dmg_path"
   local out mp
 
-  # 挂载 DMG 并返回 plist
+  # 挂载 DMG 并获取 plist 输出
   out=$(hdiutil attach -nobrowse -readonly -plist "$dmg_path" 2>/dev/null)
 
-  # 提取 <key>mount-point</key> 对应的 <string>，完整路径用双引号保护空格
+  # 使用 awk 提取 mount-point，同时保留空格
   mp=$(echo "$out" | awk '
-    /<key>mount-point<\/key>/ {getline; if($0 ~ /<string>/){gsub(/.*<string>/,""); gsub(/<\/string>.*/,""); print; exit}}
+    /<key>mount-point<\/key>/ {
+      getline
+      if($0 ~ /<string>/) {
+        # 去掉 <string> 和 </string> 标签
+        gsub(/.*<string>/,"")
+        gsub(/<\/string>.*/,"")
+        print
+        exit
+      }
+    }
   ')
 
-  # 去掉开头和结尾空格，确保路径正确
+  # 去掉开头结尾空格
   mp=$(echo "$mp" | sed 's/^ *//;s/ *$//')
 
+  # 检查挂载点是否有效
   if [[ -n "$mp" && -d "$mp" ]]; then
     ok "挂载成功：$mp"
     TEMP_MOUNTS+=("$mp")
