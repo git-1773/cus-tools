@@ -165,7 +165,7 @@ echo "🔧 🔍 检查并尝试卸载残留 IntelliJ 挂载卷..."
 # 遍历 /Volumes 下所有目录，精准匹配 IntelliJ 相关挂载点
 find /Volumes -maxdepth 1 -mindepth 1 -type d | while read -r vol; do
     # 通过挂载信息判断是否属于 IntelliJ DMG
-    if mount | grep -F "on $vol" | grep -qi "IntelliJ"; then
+    if mount | grep -F "on $vol" | grep -qi "IntelliJ IDEA"; then
         echo "🔧   ➜ 卸载残留卷: $vol"
         if hdiutil detach "$vol" -force >/dev/null 2>&1; then
             echo "✅ 已卸载：$vol"
