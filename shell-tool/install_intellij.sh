@@ -6,7 +6,6 @@
 # ✅ 重新签名 / 清理 xattr / 刷新 LaunchServices
 # ✅ 修复 zsh 挂载点丢失问题
 # ✅ 输出优化，终端更清晰
-# ✅ 临时文件在安装完成或异常退出后自动清理
 
 export LANG=zh_CN.UTF-8
 export LC_ALL=zh_CN.UTF-8
@@ -38,27 +37,15 @@ warn()   { log "⚠️  $*"; }
 err()    { log "❌ $*"; }
 
 # -------------------------------
-# 保证退出时尝试卸载挂载卷 & 清理临时文件
+# 保证退出时尝试卸载我们挂载的临时卷
 # -------------------------------
 TEMP_MOUNTS=()
-TEMP_FILES=()
 cleanup() {
-  # 卸载挂载卷
   if [[ ${#TEMP_MOUNTS[@]} -gt 0 ]]; then
     for m in "${TEMP_MOUNTS[@]}"; do
       if [[ -d "$m" ]]; then
         warn "退出时尝试卸载临时挂载：$m"
         sudo hdiutil detach "$m" -force >/dev/null 2>&1 || warn "卸载 $m 失败"
-      fi
-    done
-  fi
-
-  # 删除临时文件
-  if [[ ${#TEMP_FILES[@]} -gt 0 ]]; then
-    for f in "${TEMP_FILES[@]}"; do
-      if [[ -f "$f" ]]; then
-        warn "退出时删除临时文件：$f"
-        rm -f "$f" || warn "删除 $f 失败"
       fi
     done
   fi
@@ -79,32 +66,29 @@ unmount_old_intellij_volumes() {
 }
 
 # -------------------------------
-# ✅ 支持中文/空格路径的安全挂载 DMG（修复挂载点丢失问题）
+# ✅ 最小修改：真实卷名挂载（不再猜测，不再解析 plist）
 # -------------------------------
 mount_dmg() {
   local dmg_path="$1"
   info "📀 尝试挂载 DMG：$dmg_path"
 
-  # 创建临时文件保存 plist 输出
-  local tmpfile=$(mktemp)
-  TEMP_FILES+=("$tmpfile")
+  # 真实挂载，输出包含卷名
+  local attach_out
+  attach_out=$(hdiutil attach -nobrowse -readonly "$dmg_path" 2>/dev/null)
 
-  hdiutil attach -nobrowse -readonly -plist "$dmg_path" > "$tmpfile" 2>/dev/null
-
-  # 使用 /usr/libexec/PlistBuddy 解析 mount-point
+  # 从输出提取真实挂载点（最后一行 /Volumes/...）
   local mp
-  mp=$(/usr/libexec/PlistBuddy -c "Print :system-entities:0:mount-point" "$tmpfile" 2>/dev/null)
-  mp=$(echo "$mp" | sed 's/^ *//;s/ *$//')
+  mp=$(echo "$attach_out" | grep "/Volumes/" | tail -1 | sed -E 's/.*(\/Volumes\/.*)$/\1/')
 
   if [[ -n "$mp" && -d "$mp" ]]; then
     ok "挂载成功：$mp"
     TEMP_MOUNTS+=("$mp")
     echo "$mp"
     return 0
-  else
-    err "DMG 挂载失败或未找到卷：$dmg_path"
-    return 1
   fi
+
+  err "DMG 挂载失败或未找到卷：$dmg_path"
+  return 1
 }
 
 # -------------------------------
@@ -131,7 +115,7 @@ install_idea() {
   local mount_point
   mount_point=$(mount_dmg "$dmg") || return 1
 
-  # ✅ 修复 zsh 挂载点丢失问题
+  # 修复 zsh 挂载点丢失问题：真实查找 .app
   local src_app
   src_app=$(find "$mount_point" -maxdepth 1 -name "*.app" -print -quit)
   if [[ -z "$src_app" || ! -d "$src_app" ]]; then
@@ -157,13 +141,12 @@ install_idea() {
     sudo /usr/libexec/PlistBuddy -c "Add :${keys[$i]} string '${values[$i]}'" "$plist" 2>/dev/null
   done
 
-  # ✅ 重新签名 / 清理 xattr / 刷新 LaunchServices
+  # 重新签名 + 清理 xattr
   sudo xattr -dr com.apple.quarantine "$dest_app" 2>/dev/null || true
   sudo xattr -cr "$dest_app" 2>/dev/null || true
   sudo codesign --force --deep --sign - "$dest_app" >/dev/null 2>&1 || warn "codesign 失败"
   sudo /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$dest_app" >/dev/null 2>&1
 
-  # ✅ 保证 Launchpad 图标显示，刷新 Dock
   killall Dock >/dev/null 2>&1
   sleep 2
 
