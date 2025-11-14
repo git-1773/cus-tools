@@ -187,6 +187,8 @@ find /Volumes -maxdepth 1 -mindepth 1 -type d | while read -r vol; do
         else
             echo "⚠️ 未能卸载：$vol（可能被占用，将继续尝试下一步）"
         fi
+    else
+        echo "⚠️ 未找到残留 IntelliJ 挂载卷..."
     fi
 done
 echo "🔧 ------------------------------"
@@ -194,8 +196,8 @@ echo "🔧 ------------------------------"
 # -------------------------------
 # 安装两个版本
 # -------------------------------
-#install_idea "$IDEA_2023_DMG" "$IDEA_2023_APP"
-#install_idea "$IDEA_2025_DMG" "$IDEA_2025_APP"
+install_idea "$IDEA_2023_DMG" "$IDEA_2023_APP"
+install_idea "$IDEA_2025_DMG" "$IDEA_2025_APP"
 
 # -------------------------------
 # 启动提示
