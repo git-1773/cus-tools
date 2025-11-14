@@ -30,7 +30,7 @@ INFO_2025_VALUES=("com.jetbrains.intellij.2025.2" "IntelliJ IDEA 2025.2" "Intell
 # -------------------------------
 # 公共工具函数
 # -------------------------------
-log()    { printf "%b\n" "$*"; }
+log()    { printf "%b\n" "$*" >&2; }
 info()   { log "🔧 $*"; }
 ok()     { log "✅ $*"; }
 warn()   { log "⚠️  $*"; }
