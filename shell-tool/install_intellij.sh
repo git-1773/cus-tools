@@ -1,11 +1,14 @@
 #!/bin/zsh
 # install_intellij.sh
 # zsh: 为多版本 IntelliJ 安装做全面处理（支持中文/空格路径、卸载残留挂载、签名、清除 quarantine、刷新 LaunchServices）
-# ✅ 自动卸载残留卷
-# ✅ 支持中文/空格路径
-# ✅ 重新签名 / 清理 xattr / 刷新 LaunchServices
-# ✅ 修复 zsh 挂载点丢失问题
-# ✅ 输出优化，终端更清晰
+# ✅ 卸载并清理残留挂载卷（确保 /Volumes 没有 IntelliJ IDEA 卷）
+# ✅ 挂载 DMG（只挂载，不复制），确认真实挂载点并列出其内容（查找 .app 的准确名称）
+# ✅ 复制 .app 到目标 /Applications/IntelliJ IDEA 2023.2.app（使用在步骤 2 得到的真实名字）
+# ✅ 检查复制后的 app 结构（确保 Contents/Info.plist、Contents/MacOS/* 可见）
+# ✅ 修改 Info.plist 的四个 key（CFBundleIdentifier 等），并验收
+# ✅ 清理 xattr/quarantine / 重新签名 / 刷新 LaunchServices
+# ✅ 刷新 Dock/Launchpad，验证图标是否出现
+# ✅ 启动测试（open -n ...）
 
 export LANG=zh_CN.UTF-8
 export LC_ALL=zh_CN.UTF-8
