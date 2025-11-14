@@ -156,15 +156,31 @@ install_idea() {
 # -------------------------------
 # 清理旧版本
 # -------------------------------
-info "🧹 清理旧版本..."
-sudo rm -rf "$IDEA_2023_APP" "$IDEA_2025_APP" >/dev/null 2>&1 || true
-unmount_old_intellij_volumes
+#info "🧹 清理旧版本..."
+#sudo rm -rf "$IDEA_2023_APP" "$IDEA_2025_APP" >/dev/null 2>&1 || true
+#unmount_old_intellij_volumes
+echo "🔧 🧹 清理旧版本..."
+echo "🔧 🔍 检查并尝试卸载残留 IntelliJ 挂载卷..."
+
+# 遍历 /Volumes 下所有目录，精准匹配 IntelliJ 相关挂载点
+find /Volumes -maxdepth 1 -mindepth 1 -type d | while read -r vol; do
+    # 通过挂载信息判断是否属于 IntelliJ DMG
+    if mount | grep -F "on $vol" | grep -qi "IntelliJ"; then
+        echo "🔧   ➜ 卸载残留卷: $vol"
+        if hdiutil detach "$vol" -force >/dev/null 2>&1; then
+            echo "✅ 已卸载：$vol"
+        else
+            echo "⚠️ 未能卸载：$vol（可能被占用，将继续尝试下一步）"
+        fi
+    fi
+done
+echo "🔧 ------------------------------"
 
 # -------------------------------
 # 安装两个版本
 # -------------------------------
-install_idea "$IDEA_2023_DMG" "$IDEA_2023_APP"
-install_idea "$IDEA_2025_DMG" "$IDEA_2025_APP"
+#install_idea "$IDEA_2023_DMG" "$IDEA_2023_APP"
+#install_idea "$IDEA_2025_DMG" "$IDEA_2025_APP"
 
 # -------------------------------
 # 启动提示
