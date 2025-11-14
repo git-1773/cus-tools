@@ -91,7 +91,10 @@ mount_dmg() {
 
     # 自动解析挂载卷路径：取最后一个 Volumes 行
     local mount_point
-    mount_point=$(echo "$output" | grep "/Volumes/" | awk '{print $3}' | tail -n 1)
+    #mount_point=$(echo "$output" | grep "/Volumes/" | awk '{print $3}' | tail -n 1)
+    # 自动解析挂载卷路径：用 sed 捕获 /Volumes/...，避免空格/中文破坏解析
+    mount_point=$(echo "$output" | grep "/Volumes/" | sed -E 's|.*(/Volumes/.*)|\1|' | tail -n 1)
+
 
     if [ ! -d "$mount_point" ]; then
         err "挂载成功但未找到卷路径"
