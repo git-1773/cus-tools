@@ -65,30 +65,45 @@ unmount_old_intellij_volumes() {
   done
 }
 
-# -------------------------------
-# ✅ 最小修改：真实卷名挂载（不再猜测，不再解析 plist）
-# -------------------------------
+# ===============================================================
+# ⭐ 关键新增：挂载 DMG，自动获取挂载卷路径（不猜、不试、无风险）
+# ===============================================================
 mount_dmg() {
-  local dmg_path="$1"
-  info "📀 尝试挂载 DMG：$dmg_path"
+    local dmg="$1"
 
-  # 真实挂载，输出包含卷名
-  local attach_out
-  attach_out=$(hdiutil attach -nobrowse -readonly "$dmg_path" 2>/dev/null)
+    info "📀 挂载 DMG：$dmg"
 
-  # 从输出提取真实挂载点（最后一行 /Volumes/...）
-  local mp
-  mp=$(echo "$attach_out" | grep "/Volumes/" | tail -1 | sed -E 's/.*(\/Volumes\/.*)$/\1/')
+    if [ ! -f "$dmg" ]; then
+        err "找不到 DMG 文件：$dmg"
+        return 1
+    fi
 
-  if [[ -n "$mp" && -d "$mp" ]]; then
-    ok "挂载成功：$mp"
-    TEMP_MOUNTS+=("$mp")
-    echo "$mp"
+    # 执行挂载（不显示 Finder）
+    local output
+    output=$(hdiutil attach -nobrowse -noverify "$dmg" 2>&1)
+    if [ $? -ne 0 ]; then
+        err "DMG 挂载失败："
+        echo "$output"
+        return 1
+    fi
+
+    ok "DMG 挂载成功"
+
+    # 自动解析挂载卷路径：取最后一个 Volumes 行
+    local mount_point
+    mount_point=$(echo "$output" | grep "/Volumes/" | awk '{print $3}' | tail -n 1)
+
+    if [ ! -d "$mount_point" ]; then
+        err "挂载成功但未找到卷路径"
+        echo "$output"
+        return 1
+    fi
+
+    ok "挂载卷路径：$mount_point"
+
+    # 将挂载路径返回给调用者
+    echo "$mount_point"
     return 0
-  fi
-
-  err "DMG 挂载失败或未找到卷：$dmg_path"
-  return 1
 }
 
 # -------------------------------
