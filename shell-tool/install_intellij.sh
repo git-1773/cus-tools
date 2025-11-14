@@ -105,7 +105,8 @@ mount_dmg() {
     ok "挂载卷路径：$mount_point"
 
     # 将挂载路径返回给调用者
-    echo "$mount_point"
+    # echo "$mount_point"
+    printf "%s" "$mount_point"
     return 0
 }
 
